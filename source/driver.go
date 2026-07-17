@@ -161,14 +161,18 @@ func getVideoRoute(socketKey string, output string) (string, error) {
 		return `"unknown"`, errors.New(errMsg)
 	}
 
+	framework.Log(fmt.Sprintf("%s - active-app response body: %s", function, body))
+
 	// The app ID looks like "tvinput.hdmi2" when on an HDMI input
 	if strings.HasPrefix(app.App.ID, "tvinput.hdmi") {
 		inputNum := strings.TrimPrefix(app.App.ID, "tvinput.hdmi")
 		return `"` + inputNum + `"`, nil
+	} else {
+		// Not on an HDMI input (could be a Roku app, or TV is off)
+		errMsg := fmt.Sprintf("%s - rk3vr04 active-app is not an HDMI input; app id=%q body=%s", function, app.App.ID, body)
+		framework.AddToErrors(socketKey, errMsg)
+		return `"unknown"`, errors.New(errMsg)
 	}
-
-	// Not on an HDMI input (could be a Roku app, or TV is off)
-	return `"unknown"`, nil
 }
 
 func setVideoRoute(socketKey string, output string, input string) (string, error) {
