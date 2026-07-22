@@ -167,12 +167,26 @@ func getVideoRoute(socketKey string, output string) (string, error) {
 	if strings.HasPrefix(app.App.ID, "tvinput.hdmi") {
 		inputNum := strings.TrimPrefix(app.App.ID, "tvinput.hdmi")
 		return `"` + inputNum + `"`, nil
-	} else {
-		// Not on an HDMI input (could be a Roku app, or TV is off)
-		errMsg := fmt.Sprintf("%s - rk3vr04 active-app is not an HDMI input; app id=%q body=%s", function, app.App.ID, body)
-		framework.AddToErrors(socketKey, errMsg)
-		return `"unknown"`, errors.New(errMsg)
 	}
+
+	// Not on an HDMI input (Roku home/app, or screen off). This is an expected
+	// state, not an error, so log it for diagnostics but don't add to errors.
+	framework.Log(fmt.Sprintf("%s - rk3vr04 active-app is not an HDMI input; app id=%q", function, app.App.ID))
+	return `"unknown"`, nil
+}
+
+// isPowerOff reports whether the display is known to be off. It prefers the
+// cached power state (populated by orchestrator polling) to avoid an extra
+// device round-trip, and only queries the device directly when nothing is
+// cached. It returns true only when the power state is positively "off";
+// "on", "unknown", and query failures all return false so the caller still
+// attempts the command.
+func isPowerOff(socketKey string) bool {
+	state := framework.GetDeviceStateEndpoint(socketKey, "power")
+	if state == "" {
+		state, _ = getPower(socketKey)
+	}
+	return state == `"off"`
 }
 
 func setVideoRoute(socketKey string, output string, input string) (string, error) {
@@ -234,6 +248,13 @@ func setVolumeUpDown(socketKey string, value string) (string, error) {
 		return value, errors.New(errMsg)
 	}
 
+	// Roku keypress POSTs hang until timeout when the display is off, so skip
+	// the command if we know the display is off. This is a no-op success.
+	if isPowerOff(socketKey) {
+		framework.Log(function + " - " + socketKey + " - skipping volume keypress; display is off")
+		return `"ok"`, nil
+	}
+
 	if err := rokuPost(socketKey, path); err != nil {
 		errMsg := fmt.Sprintf("%s - rk3vud02 error sending volume command: %v", function, err)
 		framework.AddToErrors(socketKey, errMsg)
@@ -259,6 +280,13 @@ func setAudioMute(socketKey string, output string, value string) (string, error)
 		errMsg := fmt.Sprintf("%s - rk3am02 Roku mute only accepts \"toggle\", got: %s", function, value)
 		framework.AddToErrors(socketKey, errMsg)
 		return value, errors.New(errMsg)
+	}
+
+	// Roku keypress POSTs hang until timeout when the display is off, so skip
+	// the command if we know the display is off. This is a no-op success.
+	if isPowerOff(socketKey) {
+		framework.Log(function + " - " + socketKey + " - skipping mute keypress; display is off")
+		return `"ok"`, nil
 	}
 
 	if err := rokuPost(socketKey, "/keypress/VolumeMute"); err != nil {
